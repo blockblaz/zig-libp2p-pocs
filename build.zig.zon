@@ -1,0 +1,5 @@
+.{
+    .name = "zp2p-poc",
+    .version = "0.0.0",
+    .paths = .{""},
+}
