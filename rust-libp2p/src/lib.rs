@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures::future::Either;
 use std::{error::Error, net::Ipv4Addr};
 use futures::StreamExt;
+use slog::{crit, debug, info, o, trace, warn};
 
 type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
@@ -59,6 +60,22 @@ async fn build_network(selfPort: i32, connectPort: i32) {
     println!("going for loop match");
 
     if(connectPort > 0){
+        const HOME: &str = "/ip4/127.0.0.1/tcp/9001";
+        let addr: Multiaddr = HOME.parse().unwrap();
+
+        // helper closure for dialing peers
+        let mut dial = |mut multiaddr: Multiaddr| {
+            // strip the p2p protocol if it exists
+            strip_peer_id(&mut multiaddr);
+            match swarm.dial(multiaddr.clone()) {
+                Ok(()) => println!("Dialing libp2p peer address: {multiaddr}"),
+                Err(err) => {
+                    println!("Could not connect to peer address: {multiaddr} error: {err}");
+                }
+            };
+        };
+
+        dial(addr.clone());
         println!("spinning on {selfPort} and connecting on {connectPort}");
     }else{
         println!("spinning on {selfPort} and standing by...");
@@ -121,4 +138,15 @@ fn build_transport(
 /// Generate authenticated XX Noise config from identity keys
 fn generate_noise_config(identity_keypair: &Keypair) -> noise::Config {
     noise::Config::new(identity_keypair).expect("signing can fail only once during starting a node")
+}
+
+/// For a multiaddr that ends with a peer id, this strips this suffix. Rust-libp2p
+/// only supports dialing to an address without providing the peer id.
+fn strip_peer_id(addr: &mut Multiaddr) {
+    let last = addr.pop();
+    match last {
+        Some(Protocol::P2p(_)) => {}
+        Some(other) => addr.push(other),
+        _ => {}
+    }
 }
