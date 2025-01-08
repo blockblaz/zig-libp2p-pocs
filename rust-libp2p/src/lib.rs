@@ -1,6 +1,6 @@
 use libp2p::core::{multiaddr::Protocol, multiaddr::Multiaddr, muxing::StreamMuxerBox, transport::Boxed};
 use libp2p::identity::{secp256k1, Keypair};
-use libp2p::{identify, identity, core, noise, yamux, PeerId, Transport, SwarmBuilder};
+use libp2p::{identify, identity, core, noise, ping, yamux, PeerId, Transport, SwarmBuilder};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use std::time::Duration;
 use futures::future::Either;
@@ -44,11 +44,25 @@ async fn build_network(selfPort: i32, connectPort: i32) {
     let transport = build_transport(local_keypair.clone(), false).unwrap();
     println!("build the transport");
 
+    let connection_limits = {
+        let limits = libp2p::connection_limits::ConnectionLimits::default()
+            .with_max_pending_incoming(Some(5))
+            .with_max_pending_outgoing(Some(16))
+            .with_max_established_incoming(Some(10))
+            .with_max_established_outgoing(Some(10))
+            .with_max_established(Some(10))
+            .with_max_established_per_peer(Some(1));
+
+        libp2p::connection_limits::Behaviour::new(limits)
+    };
+
     let builder = SwarmBuilder::with_existing_identity(local_keypair)
         .with_tokio()
         .with_other_transport(|_key| transport)
         .expect("infalible");
-    let mut swarm = builder.with_behaviour(|key| Behaviour::new(key.public())).unwrap()
+    let mut swarm = builder
+    .with_behaviour(|_| ping::Behaviour::default()).unwrap()
+    .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
     .build();
 
     swarm.listen_on(
@@ -60,8 +74,8 @@ async fn build_network(selfPort: i32, connectPort: i32) {
     println!("going for loop match");
 
     if(connectPort > 0){
-        const HOME: &str = "/ip4/127.0.0.1/tcp/9001";
-        let addr: Multiaddr = HOME.parse().unwrap();
+        let connectString = format!("/ip4/127.0.0.1/tcp/{}", connectPort);
+        let addr: Multiaddr = connectString.parse().unwrap();
 
         // helper closure for dialing peers
         let mut dial = |mut multiaddr: Multiaddr| {
@@ -87,7 +101,10 @@ async fn build_network(selfPort: i32, connectPort: i32) {
                 let result = unsafe {zig_add(23,42)};
                 println!("Listening on {address:?} result {result}");
             },
-            SwarmEvent::Behaviour(event) => println!("{event:?}"),
+            SwarmEvent::Behaviour(event) => {
+                let result = unsafe {zig_add(23,42)};
+                println!("{event:?} result {result}");
+            },
             e => println!("{e:?}"),
         }
     }
