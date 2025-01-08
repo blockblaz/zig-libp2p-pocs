@@ -13,9 +13,19 @@ type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
 
 #[no_mangle]
-pub fn startNetwork(selfPort: i32, connectPort: i32) {
+pub fn createNetwork()-> *mut Network {
     let mut p2p_net = Network::new();
-    p2p_net.start_network(selfPort, connectPort);
+
+    let p2p_box = Box::new(p2p_net);
+    Box::into_raw(p2p_box)
+}
+
+#[no_mangle]
+pub fn startNetwork(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
+    unsafe {
+        let p2p_net = & mut *p2p_ref;
+        p2p_net.start_network(selfPort, connectPort);
+    }
 }
 
 #[no_mangle]
