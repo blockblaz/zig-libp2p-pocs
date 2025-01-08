@@ -14,7 +14,13 @@ type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
 #[no_mangle]
 pub fn startNetwork(selfPort: i32, connectPort: i32) {
-    build_network(selfPort, connectPort);
+    let mut p2p_net = Network::new();
+    p2p_net.start_network(selfPort, connectPort);
+}
+
+#[no_mangle]
+pub fn publishMsg(){
+
 }
 
 extern "C" {
@@ -65,8 +71,12 @@ impl Behaviour {
     }
 }
 
-#[tokio::main]
-async fn build_network(selfPort: i32, connectPort: i32) {
+
+pub struct Network {
+    swarm: libp2p::swarm::Swarm<Behaviour>,
+}
+impl Network {
+    pub fn new() -> Self {
     let local_private_key = secp256k1::Keypair::generate();
     let local_keypair:Keypair = local_private_key.into();
     let transport = build_transport(local_keypair.clone(), false).unwrap();
@@ -93,7 +103,17 @@ async fn build_network(selfPort: i32, connectPort: i32) {
     .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
     .build();
 
-    swarm.listen_on(
+    let network: Network = Network {
+        swarm,
+    };
+
+    network
+}
+
+#[tokio::main]
+pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
+    let mut p2p_net = self;
+    p2p_net.swarm.listen_on(
         Multiaddr::empty()
             .with(Protocol::Ip4(Ipv4Addr::UNSPECIFIED))
             .with(Protocol::Tcp(selfPort as u16)),
@@ -109,7 +129,7 @@ async fn build_network(selfPort: i32, connectPort: i32) {
         let mut dial = |mut multiaddr: Multiaddr| {
             // strip the p2p protocol if it exists
             strip_peer_id(&mut multiaddr);
-            match swarm.dial(multiaddr.clone()) {
+            match p2p_net.swarm.dial(multiaddr.clone()) {
                 Ok(()) => println!("Dialing libp2p peer address: {multiaddr}"),
                 Err(err) => {
                     println!("Could not connect to peer address: {multiaddr} error: {err}");
@@ -124,7 +144,7 @@ async fn build_network(selfPort: i32, connectPort: i32) {
     }
 
     loop {
-        match swarm.select_next_some().await {
+        match p2p_net.swarm.select_next_some().await {
             SwarmEvent::NewListenAddr { address, .. } => {
                 let result = unsafe {zig_add(23,42)};
                 println!("Listening on {address:?} result {result}");
@@ -136,6 +156,7 @@ async fn build_network(selfPort: i32, connectPort: i32) {
             e => println!("{e:?}"),
         }
     }
+}
 }
 
 fn build_transport(
