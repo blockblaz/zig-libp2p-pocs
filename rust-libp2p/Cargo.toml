@@ -15,4 +15,4 @@ slog = { version = "2", features = ["max_level_debug", "release_max_level_debug"
 [dependencies.libp2p]
 version = "0.54"
 default-features = false
-features = ["identify", "yamux", "noise", "dns", "tcp", "tokio", "plaintext", "secp256k1", "macros", "ecdsa", "metrics", "quic", "upnp", "ping"]
+features = ["identify", "yamux", "noise", "dns", "tcp", "tokio", "plaintext", "secp256k1", "macros", "ecdsa", "metrics", "quic", "upnp", "ping", "gossipsub"]
