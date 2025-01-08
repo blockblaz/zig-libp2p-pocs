@@ -24,6 +24,7 @@ extern "C" {
 #[derive(NetworkBehaviour)]
 struct Behaviour {
     identify: identify::Behaviour,
+    ping: ping::Behaviour,
 }
 
 impl Behaviour {
@@ -33,6 +34,7 @@ impl Behaviour {
                 "/ipfs/0.1.0".into(),
                 local_public_key.clone(),
             )),
+            ping: ping::Behaviour::default(),
         }
     }
 }
@@ -61,7 +63,7 @@ async fn build_network(selfPort: i32, connectPort: i32) {
         .with_other_transport(|_key| transport)
         .expect("infalible");
     let mut swarm = builder
-    .with_behaviour(|_| ping::Behaviour::default()).unwrap()
+    .with_behaviour(|key| Behaviour::new(key.public())).unwrap()
     .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
     .build();
 
