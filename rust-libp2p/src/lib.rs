@@ -8,9 +8,9 @@ use std::{error::Error, net::Ipv4Addr,collections::hash_map::DefaultHasher,hash:
 use futures::StreamExt;
 use slog::{crit, debug, info, o, trace, warn};
 use tokio::{io, io::AsyncBufReadExt, select};
+use std::num::{NonZeroU8, NonZeroUsize};
 
 type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
-
 
 #[no_mangle]
 pub fn createNetwork()-> *mut Network {
@@ -24,9 +24,25 @@ pub fn createNetwork()-> *mut Network {
 pub fn startNetwork(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
     unsafe {
         let p2p_net = & mut *p2p_ref;
-        p2p_net.start_network(selfPort, connectPort);
+        internalStartNetwork(p2p_net, selfPort, connectPort);
     }
 }
+
+// start and create network seems not to be working on thread most probably with the boxing pointer issue
+// causing segmentation fault. they seem to be fine invoked separately on main thread. But for purpose of
+// running linp2p in a zig thread, we just create and run even loop directly
+#[no_mangle]
+pub fn createAndStartNetwork(selfPort: i32, connectPort: i32){
+    let mut p2p_net = Network::new();
+    internalStartNetwork(&mut p2p_net, selfPort, connectPort);    
+}
+
+#[tokio::main]
+async fn internalStartNetwork(p2p_net: &mut Network, selfPort: i32, connectPort: i32){
+        p2p_net.start_network(selfPort, connectPort).await;
+        p2p_net.run_eventloop().await;
+}
+
 
 #[no_mangle]
 pub fn publishMsg(){
@@ -34,7 +50,7 @@ pub fn publishMsg(){
 }
 
 extern "C" {
-    fn zig_add(a: i32, b: i32) -> i32;
+    fn zig_add(a: i32, b: i32, message: &[u8]) -> i32;
 }
 
 
@@ -92,26 +108,37 @@ impl Network {
     let transport = build_transport(local_keypair.clone(), false).unwrap();
     println!("build the transport");
 
-    let connection_limits = {
-        let limits = libp2p::connection_limits::ConnectionLimits::default()
-            .with_max_pending_incoming(Some(5))
-            .with_max_pending_outgoing(Some(16))
-            .with_max_established_incoming(Some(10))
-            .with_max_established_outgoing(Some(10))
-            .with_max_established(Some(10))
-            .with_max_established_per_peer(Some(1));
+    // // use the executor for libp2p
+    // let config = libp2p::swarm::Config::without_executor()
+    //             .with_notify_handler_buffer_size(NonZeroUsize::new(7).expect("Not zero"))
+    //             .with_per_connection_event_buffer_size(4)
+    //             .with_idle_connection_timeout(Duration::from_secs(10)) // Other clients can timeout
+    //             // during negotiation
+    //             .with_dial_concurrency_factor(NonZeroU8::new(1).unwrap());
 
-        libp2p::connection_limits::Behaviour::new(limits)
-    };
+    // let connection_limits = {
+    //     let limits = libp2p::connection_limits::ConnectionLimits::default()
+    //         .with_max_pending_incoming(Some(5))
+    //         .with_max_pending_outgoing(Some(16))
+    //         .with_max_established_incoming(Some(10))
+    //         .with_max_established_outgoing(Some(10))
+    //         .with_max_established(Some(10))
+    //         .with_max_established_per_peer(Some(1));
+
+    //     libp2p::connection_limits::Behaviour::new(limits)
+    // };
 
     let builder = SwarmBuilder::with_existing_identity(local_keypair)
         .with_tokio()
         .with_other_transport(|_key| transport)
         .expect("infalible");
+    
     let mut swarm = builder
     .with_behaviour(|key| Behaviour::new(key.clone())).unwrap()
     .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
     .build();
+
+    // .with_swarm_config(|_| config)
 
     let network: Network = Network {
         swarm,
@@ -120,7 +147,6 @@ impl Network {
     network
 }
 
-#[tokio::main]
 pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
     let mut p2p_net = self;
     p2p_net.swarm.listen_on(
@@ -152,20 +178,26 @@ pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
     }else{
         println!("spinning on {selfPort} and standing by...");
     }
+}
 
+pub async fn run_eventloop(&mut self) {
     loop {
-        match p2p_net.swarm.select_next_some().await {
-            SwarmEvent::NewListenAddr { address, .. } => {
-                let result = unsafe {zig_add(23,42)};
-                println!("Listening on {address:?} result {result}");
-            },
-            SwarmEvent::Behaviour(event) => {
-                let result = unsafe {zig_add(23,42)};
-                println!("{event:?} result {result}");
-            },
-            e => println!("{e:?}"),
+            match self.swarm.select_next_some().await {
+                SwarmEvent::NewListenAddr { address, .. } => {
+                    let mut message = b"SwarmEvent::NewListenAddr";
+
+                    let result = unsafe {zig_add(23,42, message)};
+                    println!("Listening on {address:?} result {result}");
+                },
+                SwarmEvent::Behaviour(event) => {
+                    let mut message = b"SwarmEvent::Behavior(event)";
+
+                    let result = unsafe {zig_add(23,42, message)};
+                    println!("{event:?} result {result}");
+                },
+                e => println!("{e:?}"),
+            }
         }
-    }
 }
 }
 
@@ -226,3 +258,157 @@ fn strip_peer_id(addr: &mut Multiaddr) {
         _ => {}
     }
 }
+
+
+// Note: Safely ignore this
+// Below is some code experimented upon (although didn't exactly work out) to figure out how to best run rustlibp2p 
+// with evenloop in nonblocking way
+
+
+// #[no_mangle]
+// pub fn startNetwork1(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
+//     // unsafe{
+//         // let p2p_net1 = & mut *p2p_ref;
+//         // tokio::runtime::Builder::new_multi_thread()
+//         //     .enable_all()
+//         //     .build()
+//         //     .unwrap()
+//         //     .block_on(async {
+//         //         p2p_net.start_network(9001, -1).await;
+//         //     });
+
+
+//         // let runtime = tokio::runtime::Builder::new_multi_thread()
+//         // .worker_threads(1)
+//         // .enable_all()
+//         // .build()
+//         // .unwrap();
+
+//         // let handle = runtime.spawn(async {
+//         //     let mut p2p_net = Network::new();
+//         //     p2p_net.start_network(9001, -1).await;
+//         //     println!("second tokio spawn !!!!!!!");
+                
+//         //     loop {
+//         //         println!("looping --------- second tokio spawn !!!!!!!");
+                
+//         //         tokio::select! {
+//         //             event = p2p_net.swarm.next() => {
+//         //                 match event.unwrap() {
+//         //                     SwarmEvent::NewListenAddr { address, .. } => {
+//         //                         let result = unsafe {zig_add(23,42)};
+//         //                         println!("Listening on {address:?} result {result}");
+//         //                     },
+//         //                     SwarmEvent::Behaviour(event) => {
+//         //                         let result = unsafe {zig_add(23,42)};
+//         //                         println!("{event:?} result {result}");
+//         //                     },
+//         //                     e => println!("{e:?}"),
+//         //                 }
+//         //             }
+//         //         }
+                
+//         //     }
+//         // });
+
+//         // runtime.block_on(handle).unwrap();
+
+//         // tokio::runtime::Builder::new_multi_thread()
+//             // .enable_all()
+//             // .build()
+//             // .unwrap()
+//             // .block_on(async {
+//             //     // p2p_net.start_network(selfPort, connectPort).await;
+                
+//             //     tokio::spawn(async {
+//             //         let mut p2p_net = Network::new();
+//             //         p2p_net.start_network(9001, -1).await;
+//             //         println!("second tokio spawn !!!!!!!");
+                        
+//             //         loop {
+//             //             println!("looping --------- second tokio spawn !!!!!!!");
+                        
+//             //             tokio::select! {
+//             //                 event = p2p_net.swarm.next() => {
+//             //                     match event.unwrap() {
+//             //                         SwarmEvent::NewListenAddr { address, .. } => {
+//             //                             let result = unsafe {zig_add(23,42)};
+//             //                             println!("Listening on {address:?} result {result}");
+//             //                         },
+//             //                         SwarmEvent::Behaviour(event) => {
+//             //                             let result = unsafe {zig_add(23,42)};
+//             //                             println!("{event:?} result {result}");
+//             //                         },
+//             //                         e => println!("{e:?}"),
+//             //                     }
+//             //                 }
+//             //             }
+                        
+//             //         }
+//             //     }).await;
+
+//             //     tokio::spawn(async {
+//             //         println!("first tokio spawn------------");
+//             //       });
+
+//             //     println!("Hello world11111 ********");
+//             // })
+// // }
+
+
+//     unsafe {
+//         let p2p_net = & mut *p2p_ref;
+//         let mut rt = tokio::runtime::Builder::new_multi_thread()
+//         .enable_all()
+//         .build()
+//         .unwrap();
+//         rt.block_on(async {
+//             p2p_net.start_network(selfPort, connectPort).await;
+
+//             loop {
+//                 match p2p_net.swarm.select_next_some().await {
+//                     SwarmEvent::NewListenAddr { address, .. } => {
+//                         let result = unsafe {zig_add(23,42)};
+//                         println!("Listening on {address:?} result {result}");
+//                     },
+//                     SwarmEvent::Behaviour(event) => {
+//                         let result = unsafe {zig_add(23,42)};
+//                         println!("{event:?} result {result}");
+//                     },
+//                     e => println!("{e:?}"),
+//                 }
+//             }
+
+//             // tokio::spawn(async move {
+//             //     println!("first tokio spawn");
+//             // });
+
+//             // tokio::spawn(async move {
+//             //     println!("second tokio spawn");
+                
+//             // }).await;
+
+//             // tokio::spawn(async move {
+//             //     println!("thrird tokio spawn");
+//             // });
+
+            
+//         })
+//     }
+// }
+
+
+
+// pub async fn next_event(&mut self) -> NetworkEvent {
+//     loop {
+//         tokio::select! {
+//             // Poll the libp2p `Swarm`.
+//             // This will poll the swarm and do maintenance routines.
+//             Some(event) = self.swarm.next() => {
+//                 if let Some(event) = self.parse_swarm_event(event) {
+//                     return event;
+//                 }
+//             },
+//         }
+//     }
+// }
