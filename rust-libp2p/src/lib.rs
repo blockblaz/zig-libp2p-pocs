@@ -13,8 +13,8 @@ use std::num::{NonZeroU8, NonZeroUsize};
 type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
 #[no_mangle]
-pub fn createNetwork()-> *mut Network {
-    let mut p2p_net = Network::new();
+pub fn createNetwork(zigHandler: u64)-> *mut Network {
+    let mut p2p_net = Network::new(zigHandler);
 
     let p2p_box = Box::new(p2p_net);
     Box::into_raw(p2p_box)
@@ -32,8 +32,8 @@ pub fn startNetwork(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
 // causing segmentation fault. they seem to be fine invoked separately on main thread. But for purpose of
 // running linp2p in a zig thread, we just create and run even loop directly
 #[no_mangle]
-pub fn createAndStartNetwork(selfPort: i32, connectPort: i32){
-    let mut p2p_net = Network::new();
+pub fn createAndStartNetwork(zigHandler: u64,selfPort: i32, connectPort: i32){
+    let mut p2p_net = Network::new(zigHandler);
     internalStartNetwork(&mut p2p_net, selfPort, connectPort);    
 }
 
@@ -50,7 +50,7 @@ pub fn publishMsg(){
 }
 
 extern "C" {
-    fn zig_add(a: i32, b: i32, message: &[u8]) -> i32;
+    fn zig_add(libp2pEvents: u64, a: i32, b: i32, message: &[u8]) -> i32;
 }
 
 
@@ -100,13 +100,14 @@ impl Behaviour {
 
 pub struct Network {
     swarm: libp2p::swarm::Swarm<Behaviour>,
+    zigHandler: u64,
 }
 impl Network {
-    pub fn new() -> Self {
+    pub fn new(zigHandler: u64) -> Self {
     let local_private_key = secp256k1::Keypair::generate();
     let local_keypair:Keypair = local_private_key.into();
     let transport = build_transport(local_keypair.clone(), false).unwrap();
-    println!("build the transport");
+    println!("build the transport {zigHandler}");
 
     // // use the executor for libp2p
     // let config = libp2p::swarm::Config::without_executor()
@@ -142,6 +143,7 @@ impl Network {
 
     let network: Network = Network {
         swarm,
+        zigHandler,
     };
 
     network
@@ -186,13 +188,13 @@ pub async fn run_eventloop(&mut self) {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     let mut message = b"SwarmEvent::NewListenAddr";
 
-                    let result = unsafe {zig_add(23,42, message)};
+                    let result = unsafe {zig_add(self.zigHandler,23,42, message)};
                     println!("Listening on {address:?} result {result}");
                 },
                 SwarmEvent::Behaviour(event) => {
                     let mut message = b"SwarmEvent::Behavior(event)";
 
-                    let result = unsafe {zig_add(23,42, message)};
+                    let result = unsafe {zig_add(self.zigHandler,23,42, message)};
                     println!("{event:?} result {result}");
                 },
                 e => println!("{e:?}"),
