@@ -2,14 +2,14 @@ const std = @import("std");
 const fs = std.fs;
 
 const RUST_DIR = "./rust-libp2p";
-const RUST_RELEASE_DIR = RUST_DIR ++ "/target/release";
+const RUST_RELEASE_DIR = RUST_DIR ++ "/target/debug";
 const DLL_NAME = "librust_libp2p.a";
 
 const RUST_DLL_RELEASE_PATH = RUST_RELEASE_DIR ++ "/" ++ DLL_NAME;
 const ZIG_BIN_OUT_DIR = "zig-out/bin";
 
 pub fn build(b: *std.Build) !void {
-    _ = b.run(&[_][]const u8{ "cargo", "build", "--manifest-path", RUST_DIR ++ "/Cargo.toml", "--release" });
+    _ = b.run(&[_][]const u8{ "cargo", "build", "--manifest-path", RUST_DIR ++ "/Cargo.toml" });
     const cwd = fs.cwd();
     std.debug.print("Copying {s} to {s}\n", .{ RUST_DLL_RELEASE_PATH, ZIG_BIN_OUT_DIR });
     try fs.Dir.copyFile(cwd, RUST_DLL_RELEASE_PATH, cwd, ZIG_BIN_OUT_DIR ++ "/" ++ DLL_NAME, .{});

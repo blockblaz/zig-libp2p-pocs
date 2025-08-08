@@ -1,5 +1,6 @@
 .{
-    .name = "zp2p-poc",
+    .name = .zp2ppoc,
+    .fingerprint = 0xca7397acf75d5bd,
     .version = "0.0.0",
     .paths = .{""},
 }
