@@ -9,6 +9,7 @@ use futures::StreamExt;
 use slog::{crit, debug, info, o, trace, warn};
 use tokio::{io, io::AsyncBufReadExt, select};
 use std::num::{NonZeroU8, NonZeroUsize};
+use tokio::runtime::{Builder, Runtime};
 
 type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
@@ -20,11 +21,24 @@ pub fn createNetwork(zigHandler: u64)-> *mut Network {
     Box::into_raw(p2p_box)
 }
 
+static mut swarm_state: Option<libp2p::swarm::Swarm<Behaviour>> = None;
+
 #[no_mangle]
 pub fn startNetwork(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
     unsafe {
         let p2p_net = & mut *p2p_ref;
-        internalStartNetwork(p2p_net, selfPort, connectPort);
+
+        let rt = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime");
+
+        rt.block_on(async {
+           p2p_net.start_network(selfPort, connectPort).await;
+           p2p_net.run_eventloop().await;
+        
+        });
+
         pollEventLoop(p2p_net);
     }
 }
@@ -39,9 +53,16 @@ pub fn createAndStartNetwork(zigHandler: u64,selfPort: i32, connectPort: i32){
 }
 
 
-#[tokio::main]
-async fn pollEventLoop(p2p_net: &mut Network){
-    p2p_net.run_eventloop().await;
+fn pollEventLoop(p2p_net: &mut Network){
+    let rt = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime");
+    
+        rt.block_on(async {
+           p2p_net.run_eventloop().await;
+
+        })
 }
 
 
@@ -107,7 +128,6 @@ impl Behaviour {
 
 
 pub struct Network {
-    swarm: libp2p::swarm::Swarm<Behaviour>,
     zigHandler: u64,
 }
 impl Network {
@@ -147,10 +167,13 @@ impl Network {
     .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
     .build();
 
+    unsafe{
+        swarm_state = Some(swarm);
+    }
+
     // .with_swarm_config(|_| config)
 
     let network: Network = Network {
-        swarm,
         zigHandler,
     };
 
@@ -159,7 +182,8 @@ impl Network {
 
 pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
     let mut p2p_net = self;
-    p2p_net.swarm.listen_on(
+    let mut swarm = unsafe {swarm_state.as_mut().unwrap()};
+    swarm.listen_on(
         Multiaddr::empty()
             .with(Protocol::Ip4(Ipv4Addr::UNSPECIFIED))
             .with(Protocol::Tcp(selfPort as u16)),
@@ -175,7 +199,7 @@ pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
         let mut dial = |mut multiaddr: Multiaddr| {
             // strip the p2p protocol if it exists
             strip_peer_id(&mut multiaddr);
-            match p2p_net.swarm.dial(multiaddr.clone()) {
+            match swarm.dial(multiaddr.clone()) {
                 Ok(()) => println!("Dialing libp2p peer address: {multiaddr}"),
                 Err(err) => {
                     println!("Could not connect to peer address: {multiaddr} error: {err}");
@@ -191,8 +215,9 @@ pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
 }
 
 pub async fn run_eventloop(&mut self) {
+    let mut swarm = unsafe {swarm_state.as_mut().unwrap()};
      {
-            match self.swarm.select_next_some().await {
+            match swarm.select_next_some().await {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     let mut message = b"SwarmEvent::NewListenAddr";
 
