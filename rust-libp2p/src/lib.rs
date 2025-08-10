@@ -25,6 +25,7 @@ pub fn startNetwork(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
     unsafe {
         let p2p_net = & mut *p2p_ref;
         internalStartNetwork(p2p_net, selfPort, connectPort);
+        pollEventLoop(p2p_net);
     }
 }
 
