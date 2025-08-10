@@ -67,10 +67,10 @@ pub fn main() !void {
     const connect_port = try std.fmt.parseInt(i32, args.next() orelse "-1", 10);
     var libp2pEvents = Libp2pEvents{ .mutex = Mutex{}, .messages = std.ArrayList([]const u8).init(std.heap.page_allocator), .id = 2345 };
 
-    const thread = try Thread.spawn(.{}, startThreadedNetwork, .{ self_port, connect_port, &libp2pEvents });
-    _ = thread;
+    // const thread = try Thread.spawn(.{}, startThreadedNetwork, .{ self_port, connect_port, &libp2pEvents });
+    // _ = thread;
 
-    // try startMainThreadNetwork(self_port, connect_port);
+    try startMainThreadNetwork(self_port, connect_port, &libp2pEvents);
 
     var i: i32 = 0;
     while (true) {
