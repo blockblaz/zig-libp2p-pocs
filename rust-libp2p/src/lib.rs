@@ -37,6 +37,13 @@ pub fn createAndStartNetwork(zigHandler: u64,selfPort: i32, connectPort: i32){
     internalStartNetwork(&mut p2p_net, selfPort, connectPort);    
 }
 
+
+#[tokio::main]
+async fn pollEventLoop(p2p_net: &mut Network){
+    p2p_net.run_eventloop().await;
+}
+
+
 #[tokio::main]
 async fn internalStartNetwork(p2p_net: &mut Network, selfPort: i32, connectPort: i32){
         p2p_net.start_network(selfPort, connectPort).await;
@@ -183,7 +190,7 @@ pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
 }
 
 pub async fn run_eventloop(&mut self) {
-    loop {
+     {
             match self.swarm.select_next_some().await {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     let mut message = b"SwarmEvent::NewListenAddr";
