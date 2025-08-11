@@ -14,74 +14,63 @@ use tokio::runtime::{Builder, Runtime};
 type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
 #[no_mangle]
-pub fn createNetwork(zigHandler: u64)-> *mut Network {
-    let mut p2p_net = Network::new(zigHandler);
+pub fn createNetwork(zigHandler: u64, selfPort: i32, connectPort: i32) {
 
-    let p2p_box = Box::new(p2p_net);
-    Box::into_raw(p2p_box)
+    let rt = Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+
+        rt.block_on(async move {
+            let mut p2p_net = Network::new(zigHandler);
+           p2p_net.start_network(selfPort, connectPort).await;       
+           p2p_net.run_eventloop().await;
+
+        });
 }
 
 static mut swarm_state: Option<libp2p::swarm::Swarm<Behaviour>> = None;
 
-#[no_mangle]
-pub fn startNetwork(p2p_ref: *mut Network, selfPort: i32, connectPort: i32){
-    unsafe {
-        let p2p_net = & mut *p2p_ref;
-
-        let rt = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime");
-
-        rt.block_on(async {
-           p2p_net.start_network(selfPort, connectPort).await;
-           p2p_net.run_eventloop().await;
-        
-        });
-
-        pollEventLoop(p2p_net);
-    }
-}
-
-// start and create network seems not to be working on thread most probably with the boxing pointer issue
-// causing segmentation fault. they seem to be fine invoked separately on main thread. But for purpose of
-// running linp2p in a zig thread, we just create and run even loop directly
-#[no_mangle]
-pub fn createAndStartNetwork(zigHandler: u64,selfPort: i32, connectPort: i32){
-    let mut p2p_net = Network::new(zigHandler);
-    internalStartNetwork(&mut p2p_net, selfPort, connectPort);    
-}
-
-
-fn pollEventLoop(p2p_net: &mut Network){
-    let rt = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime");
-    
-        rt.block_on(async {
-           p2p_net.run_eventloop().await;
-
-        })
-}
-
-
-#[tokio::main]
-async fn internalStartNetwork(p2p_net: &mut Network, selfPort: i32, connectPort: i32){
-        p2p_net.start_network(selfPort, connectPort).await;
-        p2p_net.run_eventloop().await;
-}
-
 
 #[no_mangle]
-pub fn publishMsg(){
-
+pub fn publishMsg(i: i32){
+        let s = format!("You live in {i}.");
+        println!("publishing message s={s}");
+        let topic = gossipsub::IdentTopic::new("test-net");
+        let mut swarm = unsafe {swarm_state.as_mut().unwrap()};
+        if let Err(e) = swarm.behaviour_mut().gossipsub
+                    .publish(topic.clone(), s.as_bytes()){
+                    println!("Publish error: {e:?}");
+                }
 }
 
 extern "C" {
     fn zig_add(libp2pEvents: u64, a: i32, b: i32, message: &[u8]) -> i32;
 }
 
+fn newSwarm() -> libp2p::swarm::Swarm<Behaviour> {
+    let local_private_key = secp256k1::Keypair::generate();
+    let local_keypair:Keypair = local_private_key.into();
+    let transport = build_transport(local_keypair.clone(), false).unwrap();
+    println!("build the transport");
+
+    let builder = SwarmBuilder::with_existing_identity(local_keypair)
+        .with_tokio()
+        .with_other_transport(|_key| transport)
+        .expect("infalible");
+    
+    let mut swarm = builder
+    .with_behaviour(|key| Behaviour::new(key.clone())).unwrap()
+    .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
+    .build();
+
+    let topic = gossipsub::IdentTopic::new("test-net");
+    // subscribes to our topic
+    swarm.behaviour_mut().gossipsub.subscribe(&topic);
+
+    swarm
+}
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
@@ -89,6 +78,7 @@ struct Behaviour {
     ping: ping::Behaviour,
     gossipsub: gossipsub::Behaviour,
 }
+
 
 impl Behaviour {
     fn new(key: identity::Keypair) -> Self {
@@ -132,10 +122,7 @@ pub struct Network {
 }
 impl Network {
     pub fn new(zigHandler: u64) -> Self {
-    let local_private_key = secp256k1::Keypair::generate();
-    let local_keypair:Keypair = local_private_key.into();
-    let transport = build_transport(local_keypair.clone(), false).unwrap();
-    println!("build the transport {zigHandler}");
+    
 
     // // use the executor for libp2p
     // let config = libp2p::swarm::Config::without_executor()
@@ -157,19 +144,8 @@ impl Network {
     //     libp2p::connection_limits::Behaviour::new(limits)
     // };
 
-    let builder = SwarmBuilder::with_existing_identity(local_keypair)
-        .with_tokio()
-        .with_other_transport(|_key| transport)
-        .expect("infalible");
-    
-    let mut swarm = builder
-    .with_behaviour(|key| Behaviour::new(key.clone())).unwrap()
-    .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(u64::MAX)))
-    .build();
+    // let mut swarm = ;
 
-    unsafe{
-        swarm_state = Some(swarm);
-    }
 
     // .with_swarm_config(|_| config)
 
@@ -182,7 +158,9 @@ impl Network {
 
 pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
     let mut p2p_net = self;
-    let mut swarm = unsafe {swarm_state.as_mut().unwrap()};
+    let mut swarm = newSwarm();
+        println!("starting listner");
+
     swarm.listen_on(
         Multiaddr::empty()
             .with(Protocol::Ip4(Ipv4Addr::UNSPECIFIED))
@@ -212,11 +190,16 @@ pub async fn start_network(&mut self,selfPort: i32, connectPort: i32) {
     }else{
         println!("spinning on {selfPort} and standing by...");
     }
+
+    unsafe{
+        swarm_state = Some(swarm);
+    }
+
 }
 
 pub async fn run_eventloop(&mut self) {
     let mut swarm = unsafe {swarm_state.as_mut().unwrap()};
-     {
+     loop {
             match swarm.select_next_some().await {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     let mut message = b"SwarmEvent::NewListenAddr";

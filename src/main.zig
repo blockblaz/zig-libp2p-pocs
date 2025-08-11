@@ -12,9 +12,8 @@ export fn zig_add(libp2pEvents: *Libp2pEvents, a: i32, b: i32, message: [*:0]con
     return a + b;
 }
 
-pub extern fn createNetwork(a: *Libp2pEvents) u32;
-pub extern fn startNetwork(a: u32, a: i32, b: i32) void;
-pub extern fn createAndStartNetwork(z: *Libp2pEvents, a: i32, b: i32) void;
+pub extern fn createNetwork(a: *Libp2pEvents, a: i32, b: i32) u32;
+pub extern fn publishMsg(i: i32) void;
 
 const Libp2pEvents = struct {
     mutex: Mutex,
@@ -32,29 +31,13 @@ const Libp2pEvents = struct {
 };
 
 fn startMainThreadNetwork(self_port: i32, connect_port: i32, libp2pEvents: *Libp2pEvents) !void {
-    const p2p_ptr = createNetwork(libp2pEvents);
-    std.debug.print("starting selfPort: {d} connectPort={d}\n", .{ self_port, connect_port });
-    startNetwork(p2p_ptr, self_port, connect_port);
+    const p2p_ptr = createNetwork(libp2pEvents, self_port, connect_port);
     std.debug.print("rust_libp2p.dll: createNetwork({}, {}) = {}\n", .{ self_port, connect_port, p2p_ptr });
 
     var i: i32 = 0;
     while (true) {
         i = i + 1;
         std.debug.print(" startMainThreadNetwork sleeping iteration: {d}\n", .{i});
-        std.time.sleep(1000000000);
-    }
-}
-
-fn startThreadedNetwork(self_port: i32, connect_port: i32, libp2pEvents: *Libp2pEvents) !void {
-    std.debug.print("starting selfPort: {d} connectPort={d} libp2pEvents={*}\n", .{ self_port, connect_port, libp2pEvents });
-
-    createAndStartNetwork(libp2pEvents, self_port, connect_port);
-    std.debug.print("rust_libp2p.dll: createAndStartNetwork({}, {})\n", .{ self_port, connect_port });
-
-    var i: i32 = 0;
-    while (true) {
-        i = i + 1;
-        std.debug.print(" startThreadedNetwork sleeping iteration: {d}\n", .{i});
         std.time.sleep(1000000000);
     }
 }
@@ -67,15 +50,18 @@ pub fn main() !void {
     const connect_port = try std.fmt.parseInt(i32, args.next() orelse "-1", 10);
     var libp2pEvents = Libp2pEvents{ .mutex = Mutex{}, .messages = std.ArrayList([]const u8).init(std.heap.page_allocator), .id = 2345 };
 
-    // const thread = try Thread.spawn(.{}, startThreadedNetwork, .{ self_port, connect_port, &libp2pEvents });
-    // _ = thread;
+    const thread = try Thread.spawn(.{}, startMainThreadNetwork, .{ self_port, connect_port, &libp2pEvents });
+    _ = thread;
 
-    try startMainThreadNetwork(self_port, connect_port, &libp2pEvents);
+    // try startMainThreadNetwork(self_port, connect_port, &libp2pEvents);
 
     var i: i32 = 0;
     while (true) {
         i = i + 1;
         std.debug.print("main sleeping iteration: {d}\n", .{i});
         std.time.sleep(1000000000);
+        if (connect_port > 0) {
+            publishMsg(i);
+        }
     }
 }
