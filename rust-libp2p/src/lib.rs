@@ -10,6 +10,8 @@ use slog::{crit, debug, info, o, trace, warn};
 use tokio::{io, io::AsyncBufReadExt, select};
 use std::num::{NonZeroU8, NonZeroUsize};
 use tokio::runtime::{Builder, Runtime};
+use std::ffi::CString;
+use std::os::raw::c_char;
 
 type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 
@@ -48,7 +50,7 @@ pub fn publishMsg(message_str: *const u8, message_len: usize){
 }
 
 extern "C" {
-    fn zig_add(libp2pEvents: u64, a: i32, b: i32, message: &[u8]) -> i32;
+    fn zig_add(libp2pEvents: u64, a: i32, b: i32, message: *mut c_char) -> i32;
 }
 
 fn newSwarm() -> libp2p::swarm::Swarm<Behaviour> {
@@ -204,16 +206,20 @@ pub async fn run_eventloop(&mut self) {
      loop {
             match swarm.select_next_some().await {
                 SwarmEvent::NewListenAddr { address, .. } => {
-                    let mut message = b"SwarmEvent::NewListenAddr";
-
-                    let result = unsafe {zig_add(self.zigHandler,23,42, message)};
-                    println!("Listening on {address:?} result {result}");
+                    println!("\nListening on {address:?}\n");
                 },
-                SwarmEvent::Behaviour(event) => {
-                    let mut message = b"SwarmEvent::Behavior(event)";
+                SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
+                    message, ..
+                    })) => {
+                    {
 
-                    let result = unsafe {zig_add(self.zigHandler,23,42, message)};
-                    println!("{event:?} result {result}");
+                        let my_vec: Vec<u8> =  message.data;
+                        let raw_ptr: *mut c_char = CString::new(my_vec).expect("cstring").into_raw(); 
+                        let result = unsafe {zig_add(self.zigHandler,23,42, raw_ptr)};
+                        println!("\nzig callback result {result}\n");
+                    }
+
+                    
                 },
                 e => println!("{e:?}"),
             }

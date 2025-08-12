@@ -26,7 +26,7 @@ const Libp2pEvents = struct {
         defer self.mutex.unlock();
 
         try self.messages.append(message);
-        std.debug.print("pushed {s}, messages: {any}", .{ message, self.messages.items.len });
+        std.debug.print("\npushed {s}, messages: {any}\n", .{ message, self.messages.items.len });
     }
 };
 
@@ -61,7 +61,7 @@ pub fn main() !void {
         std.debug.print("main sleeping iteration: {d}\n", .{i});
         std.time.sleep(1000000000);
         if (connect_port > 0) {
-            const message = try std.fmt.allocPrint(allocator, "main sleeping iteration: {d}", .{i});
+            const message = try std.fmt.allocPrint(allocator, "peer sleeping iteration: {d}", .{i});
             publishMsg(message.ptr, message.len);
         }
     }
