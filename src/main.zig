@@ -13,7 +13,7 @@ export fn zig_add(libp2pEvents: *Libp2pEvents, a: i32, b: i32, message: [*:0]con
 }
 
 pub extern fn createNetwork(a: *Libp2pEvents, a: i32, b: i32) u32;
-pub extern fn publishMsg(i: i32) void;
+pub extern fn publishMsg(message: [*c]const u8, len: usize) void;
 
 const Libp2pEvents = struct {
     mutex: Mutex,
@@ -54,14 +54,15 @@ pub fn main() !void {
     _ = thread;
 
     // try startMainThreadNetwork(self_port, connect_port, &libp2pEvents);
-
+    const allocator = std.heap.page_allocator;
     var i: i32 = 0;
     while (true) {
         i = i + 1;
         std.debug.print("main sleeping iteration: {d}\n", .{i});
         std.time.sleep(1000000000);
         if (connect_port > 0) {
-            publishMsg(i);
+            const message = try std.fmt.allocPrint(allocator, "main sleeping iteration: {d}", .{i});
+            publishMsg(message.ptr, message.len);
         }
     }
 }

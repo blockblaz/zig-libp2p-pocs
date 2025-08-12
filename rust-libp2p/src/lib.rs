@@ -34,13 +34,15 @@ static mut swarm_state: Option<libp2p::swarm::Swarm<Behaviour>> = None;
 
 
 #[no_mangle]
-pub fn publishMsg(i: i32){
-        let s = format!("You live in {i}.");
-        println!("publishing message s={s}");
+pub fn publishMsg(message_str: *const u8, message_len: usize){
+        let message_slice = unsafe { std::slice::from_raw_parts(message_str, message_len) };
+        println!("publishing message s={:?}",message_slice);
+        let message_data = message_slice.to_vec();
+
         let topic = gossipsub::IdentTopic::new("test-net");
         let mut swarm = unsafe {swarm_state.as_mut().unwrap()};
         if let Err(e) = swarm.behaviour_mut().gossipsub
-                    .publish(topic.clone(), s.as_bytes()){
+                    .publish(topic.clone(), message_data){
                     println!("Publish error: {e:?}");
                 }
 }
