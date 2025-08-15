@@ -18,8 +18,8 @@ type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 #[no_mangle]
 pub fn createNetwork(zigHandler: u64, selfPort: i32, connectPort: i32) {
 
-    let rt = Builder::new_multi_thread()
-        .worker_threads(4)
+    let rt = Builder::new_current_thread()
+        // .worker_threads(4)
         .enable_all()
         .build()
         .unwrap();
