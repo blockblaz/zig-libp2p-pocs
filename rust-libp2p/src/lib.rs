@@ -50,7 +50,7 @@ pub fn publishMsg(message_str: *const u8, message_len: usize){
 }
 
 extern "C" {
-    fn zig_add(libp2pEvents: u64, a: i32, b: i32, message: *mut c_char) -> i32;
+    fn zig_add(libp2pEvents: u64, a: i32, b: i32, message: *const u8, len: usize) -> i32;
 }
 
 fn newSwarm() -> libp2p::swarm::Swarm<Behaviour> {
@@ -213,9 +213,9 @@ pub async fn run_eventloop(&mut self) {
                     })) => {
                     {
 
-                        let my_vec: Vec<u8> =  message.data;
-                        let raw_ptr: *mut c_char = CString::new(my_vec).expect("cstring").into_raw(); 
-                        let result = unsafe {zig_add(self.zigHandler,23,42, raw_ptr)};
+                        let message_ptr = message.data.as_ptr();
+                        let message_len = message.data.len();
+                        let result = unsafe {zig_add(self.zigHandler,23,42, message_ptr, message_len)};
                         println!("\nzig callback result {result}\n");
                     }
 

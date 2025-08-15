@@ -1,14 +1,15 @@
 const std = @import("std");
 const Thread = std.Thread;
 const Mutex = Thread.Mutex;
+const Allocator = std.mem.Allocator;
 
-export fn zig_add(libp2pEvents: *Libp2pEvents, a: i32, b: i32, message: [*:0]const u8) i32 {
-    const my = [_]u8{message[0]};
+export fn zig_add(libp2pEvents: *Libp2pEvents, a: i32, b: i32, message_ptr: [*]const u8, message_len: usize) i32 {
     // how to handle its alloc/dealloc or should new it?
-    const newmessage = std.mem.span(message);
-    libp2pEvents.push(newmessage) catch {};
+    const message: []const u8 = message_ptr[0..message_len];
+    libp2pEvents.push(message) catch {};
+    // _ = libp2pEvents;
 
-    std.debug.print("zig add {d} {d} {s} {s} libp2pEvents={any}\n", .{ a, b, my, message, libp2pEvents });
+    std.debug.print("zig add {d} {d} {s} {d}\n", .{ a, b, message, message_len });
     return a + b;
 }
 
@@ -16,6 +17,7 @@ pub extern fn createNetwork(a: *Libp2pEvents, a: i32, b: i32) u32;
 pub extern fn publishMsg(message: [*c]const u8, len: usize) void;
 
 const Libp2pEvents = struct {
+    allocator: Allocator,
     mutex: Mutex,
     messages: std.ArrayList([]const u8),
     id: u32,
@@ -25,8 +27,10 @@ const Libp2pEvents = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        try self.messages.append(message);
-        std.debug.print("\npushed {s}, messages: {any}\n", .{ message, self.messages.items.len });
+        const zig_message = try self.allocator.alloc(u8, message.len);
+        std.mem.copyForwards(u8, zig_message, message);
+        try self.messages.append(zig_message);
+        std.debug.print("\npushed {s}, messages: {any}\n", .{ zig_message, self.messages.items.len });
     }
 };
 
@@ -48,13 +52,14 @@ pub fn main() !void {
 
     const self_port = try std.fmt.parseInt(i32, args.next().?, 10);
     const connect_port = try std.fmt.parseInt(i32, args.next() orelse "-1", 10);
-    var libp2pEvents = Libp2pEvents{ .mutex = Mutex{}, .messages = std.ArrayList([]const u8).init(std.heap.page_allocator), .id = 2345 };
+    const allocator = std.heap.page_allocator;
+
+    var libp2pEvents = Libp2pEvents{ .allocator = allocator, .mutex = Mutex{}, .messages = std.ArrayList([]const u8).init(std.heap.page_allocator), .id = 2345 };
 
     const thread = try Thread.spawn(.{}, startMainThreadNetwork, .{ self_port, connect_port, &libp2pEvents });
     _ = thread;
 
     // try startMainThreadNetwork(self_port, connect_port, &libp2pEvents);
-    const allocator = std.heap.page_allocator;
     var i: i32 = 0;
     while (true) {
         i = i + 1;
