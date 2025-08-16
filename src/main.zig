@@ -3,13 +3,15 @@ const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const Allocator = std.mem.Allocator;
 
-export fn zig_add(libp2pEvents: *Libp2pEvents, a: i32, b: i32, message_ptr: [*]const u8, message_len: usize) i32 {
+export fn zig_add(libp2pEvents: *Libp2pEvents, a: i32, b: i32, topic_ptr: [*]const u8, topic_len: usize, message_ptr: [*]const u8, message_len: usize) i32 {
     // how to handle its alloc/dealloc or should new it?
     const message: []const u8 = message_ptr[0..message_len];
+    const topic: []const u8 = topic_ptr[0..topic_len];
+
     libp2pEvents.push(message) catch {};
     // _ = libp2pEvents;
 
-    std.debug.print("zig add {d} {d} {s} {d}\n", .{ a, b, message, message_len });
+    std.debug.print("zig add {d} {d} {s}::{s} {d}\n", .{ a, b, topic, message, message_len });
     return a + b;
 }
 
